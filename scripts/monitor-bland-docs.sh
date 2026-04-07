@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Bland Documentation Monitoring Script
-# Fetches latest docs from bland.ai, detects changes, updates MD files, commits to git, and sends diffs via message
+# Fetches latest docs from bland.ai, detects changes, updates MD files, commits to git, and sends diffs via Slack webhook
 # Designed to run nightly via cron
 
 set -e
@@ -12,7 +12,8 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 MONITORING_DIR="$REPO_ROOT/monitoring"
 LAST_CHECK_FILE="$MONITORING_DIR/last-check.json"
 CHANGELOG_FILE="$MONITORING_DIR/CHANGELOG.md"
-SESSION_FILE="$REPO_ROOT/.latest_changes.txt"  # For reading diffs in the session
+SESSION_FILE="$REPO_ROOT/.latest_changes.txt"
+SLACK_WEBHOOK_URL="https://hooks.slack.com/triggers/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"
 
 # URLs to monitor
 MONITORED_URLS=(
@@ -42,6 +43,27 @@ log_warn() {
 
 log_error() {
   log "${RED}ERROR${NC}: $1"
+}
+
+# Send to Slack webhook
+send_to_webhook() {
+  local diffs="$1"
+  
+  local json_payload="{\"diffs\": $(echo "$diffs" | jq -Rs .)}"
+  
+  log_info "Sending notification to Slack webhook..."
+  
+  if command -v curl &> /dev/null; then
+    curl -s -X POST "$SLACK_WEBHOOK_URL" \
+      -H "Content-Type: application/json" \
+      -d "$json_payload" &>/dev/null && log_info "Webhook sent successfully" || log_warn "Webhook send failed"
+  elif command -v wget &> /dev/null; then
+    wget -q -O- --post-data="$json_payload" \
+      --header="Content-Type: application/json" \
+      "$SLACK_WEBHOOK_URL" &>/dev/null && log_info "Webhook sent successfully" || log_warn "Webhook send failed"
+  else
+    log_error "Cannot send webhook (no curl or wget)"
+  fi
 }
 
 # Compute hash of content
@@ -170,64 +192,12 @@ EOF
   log_info "Updated CHANGELOG.md"
 }
 
-# Write notification message
-write_session_notification() {
-  local changes_summary="$1"
-  local changed_files="$2"
-  local git_head_after="$3"
-  local git_head_before="$4"
-  local changes_diff="$5"
-  local changes_to_commit="$6"
-
-  cat > "$SESSION_FILE" << EOF
-📄 Bland Documentation Changes Detected
-
-${changes_summary}
-
-📊 Changes committed and pushed:
-${changes_to_commit}
-
-📂 Files changed:
-EOF
-  
-  if [ -n "$git_head_before" ] && [ "$git_head_after" != "$git_head_before" ]; then
-    git diff --name-only "$git_head_before".."$git_head_after" 2>/dev/null | sed 's/^/- /' >> "$SESSION_FILE" 2>/dev/null || echo "- No file list available" >> "$SESSION_FILE"
-  else
-    echo "- No file diff available" >> "$SESSION_FILE"
-  fi
-  
-  cat >> "$SESSION_FILE" << EOF
-
-🔗 Commit: https://github.com/PrecisionIT-01/bland-docs/commit/${git_head_after}
-📅 Updated: $(date '+%Y-%m-%d %H:%M:%S')
-
----
-Manual review may be needed for:
-- reference/cli-commands.md (CLI commands)
-- reference/mcp-tools.md (MCP tools)
-- reference/tools.md
-- reference/webhooks.md
-- reference/personas.md
-- workflows/troubleshooting.md
-- workflows/testing.md
-
-Full diff (last 100 lines):
-EOF
-  
-  echo "$changes_diff" | head -100 >> "$SESSION_FILE"
-  
-  echo "" >> "$SESSION_FILE"
-  echo "~~ More diff available: git diff ${git_head_before}..${git_head_after}" >> "$SESSION_FILE"
-}
-
 # Check if only expected files are changed
 check_allowed_changes() {
   local status_output=$(git status --porcelain 2>/dev/null)
   
-  # If no uncommitted changes, allow
   [ -z "$status_output" ] && return 0
   
-  # Check if only .latest_changes.txt or tracking files are modified
   local unexpected=$(echo "$status_output" | grep -v "M .latest_changes.txt" | grep -v "M monitoring/" || echo "")
   
   [ -z "$unexpected" ]
@@ -237,7 +207,6 @@ check_allowed_changes() {
 main() {
   log_info "Starting Bland documentation monitoring"
   
-  # Clear session file
   > "$SESSION_FILE"
   
   for url in "${MONITORED_URLS[@]}"; do
@@ -250,18 +219,14 @@ main() {
   
   cd "$REPO_ROOT" || exit 1
   
-  # If only .latest_changes.txt is modified, that's OK (from previous run)
   if ! check_allowed_changes; then
     log_warn "Repository has unexpected uncommitted changes, skipping"
-    echo "🚫 Repository has uncommitted changes. Monitoring skipped." > "$SESSION_FILE"
-    echo "$(git status --short)" >> "$SESSION_FILE" 2>/dev/null
+    echo "Repository has uncommitted changes. Monitoring skipped." > "$SESSION_FILE"
     exit 0
   fi
   
-  # Track git HEAD before changes
   local git_head_before=$(git rev-parse HEAD 2>/dev/null || echo "")
   
-  # Fetch and check each URL
   for url in "${MONITORED_URLS[@]}"; do
     log_info "Checking: $url"
     
@@ -325,22 +290,58 @@ main() {
       fi
     fi
     
-    write_session_notification "$changes_summary" "$updated_files_text" "$git_head_after" "$git_head_before" "$changes_diff" "$changes_to_commit"
+    # Build diff message for webhook
+    local webhook_diff="📄 Bland Documentation Changes Detected
+
+${changes_summary}
+
+📊 Changes committed and pushed:
+${changes_to_commit}
+
+📂 Files changed:
+EOF
     
-    log_info "Changes detected, committed, pushed. Check .latest_changes.txt"
+    if [ -n "$git_head_before" ] && [ "$git_head_after" != "$git_head_before" ]; then
+      git diff --name-only "$git_head_before".."$git_head_after" 2>/dev/null | sed 's/^/- /' >> "$SESSION_FILE" 2>/dev/null || echo "- No file list" >> "$SESSION_FILE"
+      webhook_diff="${webhook_diff}$(git diff --name-only "$git_head_before".."$git_head_after" 2>/dev/null | sed 's/^/- /' || echo "- No file list")"
+    else
+      webhook_diff="${webhook_diff}- No file diff available"
+    fi
+    
+    webhook_diff="${webhook_diff}
+
+🔗 Commit: https://github.com/PrecisionIT-01/bland-docs/commit/${git_head_after}
+📅 Updated: $(date '+%Y-%m-%d %H:%M:%S')
+
+---
+Manual review may be needed for:
+- reference/cli-commands.md
+- reference/mcp-tools.md
+- reference/tools.md
+- reference/webhooks.md
+- reference/personas.md
+
+Full diff (last 100 lines):
+${changes_diff}
+~~ More diff available: git diff ${git_head_before}..${git_head_after}"
+
+    # Save to session file for reference
+    echo "$webhook_diff" > "$SESSION_FILE"
+    
+    # Send to webhook
+    send_to_webhook "$webhook_diff"
+    
+    log_info "Changes detected, committed, pushed, and sent to webhook"
   else
     update_last_check "null"
     log_info "No changes detected"
-    cat > "$SESSION_FILE" << EOF
-✅ No changes detected in Bland documentation.
+    
+    local no_changes="✅ No changes detected in Bland documentation.
 
-$(date '+%Y-%m-%d %H:%M:%S') - Monitoring complete, no updates needed.
-
-Monitored:
-- https://docs.bland.ai/sdks/cli.md
-- https://docs.bland.ai/llms.txt
-- https://www.npmjs.com/package/bland-cli
-EOF
+$(date '+%Y-%m-%d %H:%M:%S') - Monitoring complete, no updates needed."
+    
+    echo "$no_changes" > "$SESSION_FILE"
+    send_to_webhook "$no_changes"
   fi
 }
 
