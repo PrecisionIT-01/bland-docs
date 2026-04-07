@@ -53,7 +53,6 @@ compute_hash() {
 fetch_content() {
   local url="$1"
   
-  # Try curl first, then wget
   if command -v curl &> /dev/null; then
     curl -sL --fail "$url" 2>/dev/null || { log_error "Failed to fetch $url"; return 1; }
   elif command -v wget &> /dev/null; then
@@ -69,7 +68,6 @@ update_last_check() {
   local current_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   local last_update="$1"
 
-  # Create JSON structure
   cat > "$LAST_CHECK_FILE" << EOF
 {
   "last_check": "$current_time",
@@ -111,7 +109,7 @@ get_existing_hash() {
   fi
   
   if command -v jq &> /dev/null; then
-    jq -r ".monitored_coords.\"$url\".hash" "$LAST_CHECK_FILE" 2>/dev/null || echo ""
+    jq -r ".monitored_urls.\"$url\".hash" "$LAST_CHECK_FILE" 2>/dev/null || echo ""
   else
     grep -A2 "\"$url\"" "$LAST_CHECK_FILE" | grep "hash" | sed 's/.*"hash": "*\([^"]*\)".*/\1/' || echo ""
   fi
@@ -204,18 +202,35 @@ EOF
 📅 Updated: $(date '+%Y-%m-%d %H:%M:%S')
 
 ---
-Manual review and updates may be needed for:
+Manual review may be needed for:
 - reference/cli-commands.md (CLI commands)
 - reference/mcp-tools.md (MCP tools)
-- reference/tools.md (Tools v2 integration)
+- reference/tools.md
 - reference/webhooks.md
 - reference/personas.md
 - workflows/troubleshooting.md
 - workflows/testing.md
 
-Full git diff:
-${changes_diff}
+Full diff (last 100 lines):
 EOF
+  
+  echo "$changes_diff" | head -100 >> "$SESSION_FILE"
+  
+  echo "" >> "$SESSION_FILE"
+  echo "~~ More diff available: git diff ${git_head_before}..${git_head_after}" >> "$SESSION_FILE"
+}
+
+# Check if only expected files are changed
+check_allowed_changes() {
+  local status_output=$(git status --porcelain 2>/dev/null)
+  
+  # If no uncommitted changes, allow
+  [ -z "$status_output" ] && return 0
+  
+  # Check if only .latest_changes.txt or tracking files are modified
+  local unexpected=$(echo "$status_output" | grep -v "M .latest_changes.txt" | grep -v "M monitoring/" || echo "")
+  
+  [ -z "$unexpected" ]
 }
 
 # Main monitoring logic
@@ -225,7 +240,6 @@ main() {
   # Clear session file
   > "$SESSION_FILE"
   
-  # Initialize hashes
   for url in "${MONITORED_URLS[@]}"; do
     URL_HASHES["$url"]=""
   done
@@ -236,12 +250,10 @@ main() {
   
   cd "$REPO_ROOT" || exit 1
   
-  # Check git status in THIS repository only
-  local git_clean=$(git diff-index --quiet HEAD -- 2>/dev/null && echo "clean" || echo "dirty")
-  
-  if [ "$git_clean" = "dirty" ]; then
-    log_warn "Repository has uncommitted changes, skipping"
-    echo "🚫 Git has uncommitted changes. Monitoring skipped until clean." > "$SESSION_FILE"
+  # If only .latest_changes.txt is modified, that's OK (from previous run)
+  if ! check_allowed_changes; then
+    log_warn "Repository has unexpected uncommitted changes, skipping"
+    echo "🚫 Repository has uncommitted changes. Monitoring skipped." > "$SESSION_FILE"
     echo "$(git status --short)" >> "$SESSION_FILE" 2>/dev/null
     exit 0
   fi
@@ -269,16 +281,12 @@ main() {
       changes_detected=true
       changes_summary="$changes_summary- $url (hash: ${old_hash:0:16}... → ${new_hash:0:16}...)\n"
       
-      # Map URL to potentially affected files
       case "$url" in
-        *cli.md)
+        *cli.md*)
           updated_files_text="${updated_files_text}- reference/cli-commands.md\n- reference/mcp-tools.md\n"
           ;;
         *llms.txt*)
-          updated_files_text="${updated_files_text}- README.md (structure/links)\n"
-          ;;
-        *npm*)
-          updated_files_text="${updated_files_text}- setup/installation.md (if CLI version changes)\n"
+          updated_files_text="${updated_files_text}- README.md\n"
           ;;
       esac
     else
@@ -290,35 +298,25 @@ main() {
     local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     update_last_check "$timestamp"
     
-    # Update tracking files
-    update_changelog "Changes detected:\n\n$changes_summary\n\nAffected files may need manual review:\n\n$updated_files_text"
+    update_changelog "Changes detected:\n\n$changes_summary\n\nFiles that may need review:\n\n$updated_files_text"
     
-    # Stage tracking files
     git add "$LAST_CHECK_FILE" "$CHANGELOG_FILE" "$REPO_ROOT"/*.md 2>/dev/null || true
     git add "$REPO_ROOT"/*/*.md 2>/dev/null || true
     git add "$REPO_ROOT"/*/*/*.md 2>/dev/null || true
     
-    # Get what changes will be committed
-    local changes_to_commit=$(git diff --cached --stat 2>/dev/null || echo "No changes to commit")
+    local changes_to_commit=$(git diff --cached --stat 2>/dev/null || echo "No changes")
     
-    local commit_message="docs: update tracking after detecting changes
-
-Changes detected in monitored Bland documentation sources.
-See CHANGELOG.md for details."
-    
-    git commit -m "$commit_message" &>/dev/null || log_warn "No changes to commit"
+    git commit -m "docs: update tracking after detecting changes" &>/dev/null || log_warn "No new changes to commit"
     
     local git_head_after=$(git rev-parse HEAD 2>/dev/null || echo "")
     
-    # Generate diff if both HEADs exist
     local changes_diff=""
     if [ -n "$git_head_before" ] && [ "$git_head_after" != "$git_head_before" ]; then
-      changes_diff=$(git diff "$git_head_before".."$git_head_after" 2>/dev/null || echo "Diff generation failed")
+      changes_diff=$(git diff "$git_head_before".."$git_head_after" 2>/dev/null || echo "Diff failed")
     else
-      changes_diff="Diff not available (initial run)"
+      changes_diff="Diff not available"
     fi
     
-    # Push to remote
     if git remote -v &>/dev/null; then
       if git push &>/dev/null; then
         log_info "Successfully pushed to remote"
@@ -327,12 +325,10 @@ See CHANGELOG.md for details."
       fi
     fi
     
-    # Write notification
     write_session_notification "$changes_summary" "$updated_files_text" "$git_head_after" "$git_head_before" "$changes_diff" "$changes_to_commit"
     
-    log_info "Changes detected, committed, and pushed. Check .latest_changes.txt"
+    log_info "Changes detected, committed, pushed. Check .latest_changes.txt"
   else
-    # No changes, just update timestamp
     update_last_check "null"
     log_info "No changes detected"
     cat > "$SESSION_FILE" << EOF
@@ -340,13 +336,12 @@ See CHANGELOG.md for details."
 
 $(date '+%Y-%m-%d %H:%M:%S') - Monitoring complete, no updates needed.
 
-All monitored URLs unchanged:
+Monitored:
 - https://docs.bland.ai/sdks/cli.md
 - https://docs.bland.ai/llms.txt
-- https://www.npmjs.com/package/bland-cli (fetch attempted)
+- https://www.npmjs.com/package/bland-cli
 EOF
   fi
 }
 
-# Run main function
 main "$@"

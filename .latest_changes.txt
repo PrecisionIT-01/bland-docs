@@ -1,3 +1,2 @@
 🚫 Git has uncommitted changes. Monitoring skipped until clean.
  M .latest_changes.txt
- M scripts/monitor-bland-docs.sh
