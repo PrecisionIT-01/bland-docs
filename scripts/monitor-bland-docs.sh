@@ -244,7 +244,7 @@ main() {
     if [ "$old_hash" != "$new_hash" ]; then
       log_info "Change detected in $url"
       changes_detected=true
-      changes_summary="$changes_summary- $url (hash: ${old_hash:0:16}... → ${new_hash:0:16}...)\n"
+      changes_summary="${changes_summary}- $url (hash: ${old_hash:0:16}... → ${new_hash:0:16}...)\n"
       
       case "$url" in
         *cli.md*)
@@ -290,8 +290,17 @@ main() {
       fi
     fi
     
-    # Build diff message for webhook
-    local webhook_diff="📄 Bland Documentation Changes Detected
+    local changed_files_list=""
+    if [ -n "$git_head_before" ] && [ "$git_head_after" != "$git_head_before" ]; then
+      changed_files_list=$(git diff --name-only "$git_head_before".."$git_head_after" 2>/dev/null | sed 's/^/- /' || echo "- No file list")
+    else
+      changed_files_list="- No file diff available"
+    fi
+    
+    local commit_link="https://github.com/PrecisionIT-01/bland-docs/commit/${git_head_after}"
+    local updated_date=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    webhook_diff="📄 Bland Documentation Changes Detected
 
 ${changes_summary}
 
@@ -299,19 +308,10 @@ ${changes_summary}
 ${changes_to_commit}
 
 📂 Files changed:
-EOF
-    
-    if [ -n "$git_head_before" ] && [ "$git_head_after" != "$git_head_before" ]; then
-      git diff --name-only "$git_head_before".."$git_head_after" 2>/dev/null | sed 's/^/- /' >> "$SESSION_FILE" 2>/dev/null || echo "- No file list" >> "$SESSION_FILE"
-      webhook_diff="${webhook_diff}$(git diff --name-only "$git_head_before".."$git_head_after" 2>/dev/null | sed 's/^/- /' || echo "- No file list")"
-    else
-      webhook_diff="${webhook_diff}- No file diff available"
-    fi
-    
-    webhook_diff="${webhook_diff}
+${changed_files_list}
 
-🔗 Commit: https://github.com/PrecisionIT-01/bland-docs/commit/${git_head_after}
-📅 Updated: $(date '+%Y-%m-%d %H:%M:%S')
+🔗 Commit: ${commit_link}
+📅 Updated: ${updated_date}
 
 ---
 Manual review may be needed for:
@@ -324,11 +324,9 @@ Manual review may be needed for:
 Full diff (last 100 lines):
 ${changes_diff}
 ~~ More diff available: git diff ${git_head_before}..${git_head_after}"
-
-    # Save to session file for reference
+    
     echo "$webhook_diff" > "$SESSION_FILE"
     
-    # Send to webhook
     send_to_webhook "$webhook_diff"
     
     log_info "Changes detected, committed, pushed, and sent to webhook"
