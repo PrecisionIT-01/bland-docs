@@ -1,0 +1,1 @@
+Git has uncommitted changes. Monitoring skipped until clean.

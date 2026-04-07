@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Bland Documentation Monitoring Script
-# Fetches latest docs from bland.ai, detects changes, updates MD files, commits to git, and emails diffs
+# Fetches latest docs from bland.ai, detects changes, updates MD files, commits to git, and sends diffs via message
 # Designed to run nightly via cron
 
 set -e
@@ -12,21 +12,13 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 MONITORING_DIR="$REPO_ROOT/monitoring"
 LAST_CHECK_FILE="$MONITORING_DIR/last-check.json"
 CHANGELOG_FILE="$MONITORING_DIR/CHANGELOG.md"
-EMAIL_FROM="bland-docs-monitor@$(hostname)"
-EMAIL_TO="timothy@vegocs.com"
+SESSION_FILE="$REPO_ROOT/.latest_changes.txt"  # For reading diffs in the session
 
 # URLs to monitor
 MONITORED_URLS=(
   "https://docs.bland.ai/sdks/cli.md"
   "https://docs.bland.ai/llms.txt"
   "https://www.npmjs.com/package/bland-cli"
-)
-
-# Files to update based on detected changes
-# Format: "url_pattern|local_file"
-UPDATE_MAPPING=(
-  "https://docs.bland.ai/sdks/cli.md|reference/cli-commands.md"
-  "https://docs.bland.ai/llms.txt|README.md"
 )
 
 # Colors for output
@@ -50,24 +42,7 @@ log_warn() {
 
 log_error() {
   log "${RED}ERROR${NC}: $1"
-}
-
-# Email function
-send_email() {
-  local subject="$1"
-  local body="$2"
-
-  # Check if mail command is available
-  if command -v mail &> /dev/null; then
-    echo "$body" | mail -s "$subject" -a "From: $EMAIL_FROM" "$EMAIL_TO"
-    log_info "Email sent to $EMAIL_TO"
-  else
-    log_warn "mail command not available, skipping email"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] EMAIL DRAFT - To: $EMAIL_TO"
-    echo "Subject: $subject"
-    echo ""
-    echo "$body"
-  fi
+  echo "$1" >> "$SESSION_FILE"
 }
 
 # Compute hash of content
@@ -78,8 +53,6 @@ compute_hash() {
 # Fetch content from URL
 fetch_content() {
   local url="$1"
-  
-  log_info "Fetching: $url"
   
   # Try curl first, then wget
   if command -v curl &> /dev/null; then
@@ -112,7 +85,7 @@ EOF
       echo "," >> "$LAST_CHECK_FILE"
     fi
     
-    local hash=$(hash_to_json "$url")
+    local hash=$(get_stored_hash "$url")
     cat >> "$LAST_CHECK_FILE" << EOF
     "$url": {
       "last_fetched": "$current_time",
@@ -138,34 +111,32 @@ get_existing_hash() {
     return
   fi
   
-  # Use grep to extract hash, or jq if available
   if command -v jq &> /dev/null; then
     jq -r ".monitored_urls.\"$url\".hash" "$LAST_CHECK_FILE" 2>/dev/null || echo ""
   else
-    # Fallback: simple grep/sed extraction
     grep -A2 "\"$url\"" "$LAST_CHECK_FILE" | grep "hash" | sed 's/.*"hash": "*\([^"]*\)".*/\1/' || echo ""
   fi
 }
 
-# Hash storage for JSON output
+# Hash storage
 declare -A URL_HASHES
-
-# Store hash
 store_hash() {
   local url="$1"
   local hash="$2"
   URL_HASHES["$url"]="$hash"
 }
 
-# Get stored hash
 get_stored_hash() {
   local url="$1"
   echo "${URL_HASHES[$url]}"
 }
 
-# Convert URL to JSON-safe key for hash lookup (simplification)
-hash_to_json() {
-  echo "${URL_HASHES[$1]}"
+# Get diff between old and new content for a file
+get_git_diff() {
+  local file="$1"
+  if [ -f "$file" ]; then
+    git diff HEAD -- "$file" 2>/dev/null || echo "Diff not available for $file"
+  fi
 }
 
 # Update CHANGELOG.md
@@ -173,12 +144,9 @@ update_changelog() {
   local message="$1"
   local date=$(date '+%Y-%m-%d')
 
-  # Prepend to changelog (after the header)
   if [ -f "$CHANGELOG_FILE" ]; then
-    # Find the first existing date entry and insert before it
     local temp_file=$(mktemp)
     
-    # Keep header, insert new entry, then rest of file
     awk -v date="$date" -v message="$message" '
       /^## / && NR > 5 && !header_printed {
         print "## " date
@@ -196,7 +164,6 @@ update_changelog() {
     
     mv "$temp_file" "$CHANGELOG_FILE"
   else
-    # Create new changelog
     cat > "$CHANGELOG_FILE" << EOF
 # Bland Documentation Changelog
 
@@ -214,9 +181,41 @@ EOF
   log_info "Updated CHANGELOG.md"
 }
 
+# Write notification message for session reading
+write_session_notification() {
+  local changes_summary="$1"
+  local changed_files="$2"
+
+  cat > "$SESSION_FILE" << EOF
+📄 Bland Documentation Changes Detected
+
+${changes_summary}
+
+📂 potentially affected files:
+${changed_files}
+
+📊 Commit history:
+EOF
+  
+  # Add recent commits
+  git log --oneline -5 HEAD >> "$SESSION_FILE" 2>/dev/null
+  
+  cat >> "$SESSION_FILE" << EOF
+
+🔗 Repo: https://github.com/PrecisionIT-01/bland-docs
+📅 Updated at: $(date '+%Y-%m-%d %H:%M:%S')
+
+---
+Review the files in the repo for full details and necessary manual updates.
+EOF
+}
+
 # Main monitoring logic
 main() {
   log_info "Starting Bland documentation monitoring"
+  
+  # Clear session file for new run
+  > "$SESSION_FILE"
   
   # Initialize hashes
   for url in "${MONITORED_URLS[@]}"; do
@@ -229,71 +228,59 @@ main() {
   
   cd "$REPO_ROOT" || exit 1
   
-  # Check git status before making changes
+  # Check git status
   local git_clean=$(git diff-index --quiet HEAD -- 2>/dev/null && echo "clean" || echo "dirty")
   
   if [ "$git_clean" = "dirty" ]; then
-    log_warn "Git repository has uncommitted changes, skipping monitoring until clean"
+    log_warn "Git repository has uncommitted changes, skipping"
+    echo "Git has uncommitted changes. Monitoring skipped until clean." > "$SESSION_FILE"
     exit 0
   fi
+  
+  # Track git HEAD for diff generation
+  local git_head_before=$(git rev-parse HEAD 2>/dev/null)
   
   # Fetch and check each URL
   for url in "${MONITORED_URLS[@]}"; do
     log_info "Checking: $url"
     
-    # Fetch content
     local content
     if ! content=$(fetch_content "$url"); then
       log_warn "Skipping $url due to fetch error"
       continue
     fi
     
-    # Compute hash
     local new_hash=$(compute_hash "$content")
     store_hash "$url" "$new_hash"
     
-    # Get existing hash
     local old_hash=$(get_existing_hash "$url")
     
-    # Check if changed
     if [ "$old_hash" != "$new_hash" ]; then
       log_info "Change detected in $url"
       changes_detected=true
+      changes_summary="$changes_summary- $url (hash changed: ${old_hash:0:16}... → ${new_hash:0:16}...)\n"
       
-      # Find which file to update
-      for mapping in "${UPDATE_MAPPING[@]}"; do
-        mapping_prefix="${mapping%%|*}"
-        if [[ "$url" == "$mapping_prefix"* ]]; then
-          local target_file="${mapping#*|}"
-          local target_path="$REPO_ROOT/$target_file"
-          
-          log_info "Would update: $target_file"
-          changes_summary="$changes_summary- $url → $target_file (hash changed)\n"
-          updated_files="$updated_files$target_file\n"
-          
-          # Note: Actual content parsing and updating is complex
-          # For now, we detect changes and note what *would* need updating
-          # The user can manually update or we can enhance parsing later
-          break
-        fi
-      done
+      # Note: We track the URL change, manual updates needed for corresponding files
+      updated_files="$updated_files- See relevant docs based on: $url\n"
     else
       log_info "No changes in $url"
     fi
   done
 
-  # If changes detected, update tracking
   if [ "$changes_detected" = true ]; then
     local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     update_last_check "$timestamp"
     
-    # Update changelog
-    update_changelog "Changes detected in monitored URLs:\n\n$changes_summary\n\nManual review and updates required for:\n\n$updated_files"
+    # Update tracking files
+    update_changelog "Changes detected in monitored sources:\n\n$changes_summary\n\nManual review required for affected documentation files."
     
-    # Git commit
+    # Stage tracking files
     git add "$LAST_CHECK_FILE" "$CHANGELOG_FILE" "$REPO_ROOT"/*.md 2>/dev/null || true
     git add "$REPO_ROOT"/*/*.md 2>/dev/null || true
     git add "$REPO_ROOT"/*/*/*.md 2>/dev/null || true
+    
+    # Check what changes will be committed
+    local changes_to_commit=$(git diff --cached --stat 2>/dev/null)
     
     local commit_message="docs: update tracking after detecting changes
 
@@ -303,34 +290,20 @@ See CHANGELOG.md for details."
     if git commit -m "$commit_message" &>/dev/null; then
       log_info "Committed changes to git"
     else
-      log_warn "No new changes to commit (or commit failed)"
+      log_warn "No new changes to commit"
     fi
     
-    # Send email notification
-    local email_subject="Bland Documentation Changes Detected - $(date '+%Y-%m-%d')"
-    local email_body="Changes detected in monitored Bland documentation sources.
-
-Updated at: $(date '+%Y-%m-%d %H:%M:%S')
-
-Changes detected:
-$changes_summary
-
-Files that may need manual review/updates:
-$updated_files
-
-Changes have been tracked in: $CHANGELOG_FILE
-
-Repository: $REPO_ROOT
-
----
-This is an automated message from the Bland documentation monitoring script.
-"
+    # Generate diff of what was committed
+    local git_head_after=$(git rev-parse HEAD 2>/dev/null)
+    local changes_diff=""
+    if [ "$git_head_before" != "$git_head_after" ] && [ -n "$git_head_before" ]; then
+      changes_diff=$(git diff "$git_head_before".."$git_head_after" 2>/dev/null || echo "Diff generation failed")
+    else
+      changes_diff="No git diff generated (first run or no changes)"
+    fi
     
-    send_email "$email_subject" "$email_body"
-    
-    # Push to remote if configured
+    # Push to remote
     if git remote -v &>/dev/null; then
-      log_info "Attempting to push to remote..."
       if git push &>/dev/null; then
         log_info "Successfully pushed to remote"
       else
@@ -338,11 +311,42 @@ This is an automated message from the Bland documentation monitoring script.
       fi
     fi
     
-    log_info "Monitoring complete. Changes detected and documented."
+    # Write notification with diff
+    cat > "$SESSION_FILE" << EOF
+📄 Bland Documentation Changes Detected
+
+${changes_summary}
+
+📊 Changes pushed to GitHub:
+${changes_to_commit}
+
+📂 Files committed:
+EOF
+    git diff --name-only "$git_head_before".."$git_head_after" 2>/dev/null | sed 's/^/- /' >> "$SESSION_FILE" 2>/dev/null
+    
+    cat >> "$SESSION_FILE" << EOF
+
+🔗 Repo: https://github.com/PrecisionIT-01/bland-docs/commit/${git_head_after}
+📅 Updated at: $(date '+%Y-%m-%d %H:%M:%S')
+
+---
+Review the committed files in the repo. Full git diff available via:
+git diff ${git_head_before}..${git_head_after}
+
+Manual updates may be needed for:
+- CLI commands in reference/cli-commands.md
+- MCP tools in reference/mcp-tools.md  
+- Tools, Webhooks, Personas guides
+- Workflow documentation
+EOF
+    
+    log_info "Changes detected, committed, and pushed. Check .latest_changes.txt for details."
   else
     # No changes, just update timestamp
     update_last_check "null"
-    log_info "No changes detected. Monitoring complete."
+    log_info "No changes detected"
+    echo "✅ No changes detected in Bland documentation." > "$SESSION_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Monitoring complete, no updates needed." >> "$SESSION_FILE"
   fi
 }
 
