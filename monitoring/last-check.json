@@ -1,23 +1,23 @@
 {
-  "last_check": "2026-04-07T03:03:01Z",
+  "last_check": "2026-04-07T03:16:15Z",
   "monitored_urls": {
     "https://docs.bland.ai/sdks/cli.md": {
-      "last_fetched": "2026-04-07T03:03:01Z",
-      "hash": "4727663773b81be43bd2921ff35fe70a62d97a6a6fa6804790a001742b2843bd",
+      "last_fetched": "2026-04-07T03:16:15Z",
+      "hash": "51e91577fda48ca6cb0ee6b900d9f5acbf44f998f3d067f121efdf1c21e1afd1",
       "needs_update": false
     }
 ,
     "https://docs.bland.ai/llms.txt": {
-      "last_fetched": "2026-04-07T03:03:01Z",
-      "hash": "9566fec4ca50fe206accce5553a77c42795296772e16c6d2c646701b136c0eb6",
+      "last_fetched": "2026-04-07T03:16:15Z",
+      "hash": "7fa796f3f95b77c39492ec10c9fcc554981c478a1e3172aa3d1252a20a1488dd",
       "needs_update": false
     }
 ,
     "https://www.npmjs.com/package/bland-cli": {
-      "last_fetched": "2026-04-07T03:03:01Z",
+      "last_fetched": "2026-04-07T03:16:15Z",
       "hash": "",
       "needs_update": false
     }
   },
-  "last_update": "2026-04-07T03:03:01Z"
+  "last_update": "2026-04-07T03:16:15Z"
 }
