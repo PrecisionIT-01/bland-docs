@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Sync docs from bland-docs to all client repos
-# Called by monitor-bland-docs.sh after changes detected
+# Only copies operational docs (CLI, MCP, workflows) - no automation/sync docs
 
 set -e
 
@@ -10,8 +10,8 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 CLIENTS_FILE="$REPO_ROOT/clients.json"
 CLIENTS_DIR="$REPO_ROOT/clients"
 ORG="Bland-Applied-Solutions"
+README_TEMPLATE="$REPO_ROOT/templates/client-README.md"
 
-# Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
@@ -22,7 +22,6 @@ log_info() { log "${GREEN}✓${NC} $1"; }
 log_warn() { log "${YELLOW}!${NC} $1"; }
 log_error() { log "${RED}✗${NC} $1"; }
 
-# Sync a single client repo
 sync_client() {
   local name="$1"
   local repo="$2"
@@ -30,42 +29,48 @@ sync_client() {
   
   log "Syncing: $name ($repo)"
   
-  # Clone if needed
   if [ ! -d "$client_dir" ]; then
     log_info "Cloning $repo..."
-    gh repo clone "$ORG/$repo" "$client_dir" 2>/dev/null || {
-      log_error "Failed to clone $repo"
-      return 1
-    }
+    gh repo clone "$ORG/$repo" "$client_dir" 2>/dev/null || return 1
   fi
   
   cd "$client_dir"
-  
-  # Pull latest
   git pull origin main 2>/dev/null || git pull origin master 2>/dev/null || true
   
-  # Copy docs from bland-docs (preserve .env)
-  log_info "Copying docs..."
+  log_info "Copying operational docs..."
   
-  # Copy directories
-  cp -r "$REPO_ROOT/setup" . 2>/dev/null || true
-  cp -r "$REPO_ROOT/reference" . 2>/dev/null || true
-  cp -r "$REPO_ROOT/workflows" . 2>/dev/null || true
-  cp -r "$REPO_ROOT/monitoring" . 2>/dev/null || true
+  # Create directory structure
+  mkdir -p setup reference workflows
   
-  # Copy scripts
-  mkdir -p scripts
-  cp "$REPO_ROOT/scripts/monitor-bland-docs.sh" ./scripts/ 2>/dev/null || true
+  # Copy ONLY operational docs (no monitoring, no sync scripts)
+  cp "$REPO_ROOT/setup/installation.md" ./setup/ 2>/dev/null || true
+  cp "$REPO_ROOT/setup/cursor-integration.md" ./setup/ 2>/dev/null || true
   
-  # Copy README (update title to keep client name)
-  if [ -f "$REPO_ROOT/README.md" ]; then
-    # Preserve client-specific title if already set
-    if head -1 README.md 2>/dev/null | grep -q "Bland CLI Documentation"; then
-      sed -i "s/# Bland CLI Documentation.*/# Bland CLI Documentation - $name/" README.md 2>/dev/null || true
-    fi
+  cp "$REPO_ROOT/reference/cli-commands.md" ./reference/ 2>/dev/null || true
+  cp "$REPO_ROOT/reference/mcp-tools.md" ./reference/ 2>/dev/null || true
+  cp "$REPO_ROOT/reference/tools.md" ./reference/ 2>/dev/null || true
+  cp "$REPO_ROOT/reference/webhooks.md" ./reference/ 2>/dev/null || true
+  cp "$REPO_ROOT/reference/personas.md" ./reference/ 2>/dev/null || true
+  cp "$REPO_ROOT/reference/custom-code-node.md" ./reference/ 2>/dev/null || true
+  cp "$REPO_ROOT/reference/web-agent-sdk.md" ./reference/ 2>/dev/null || true
+  
+  cp "$REPO_ROOT/workflows/troubleshooting.md" ./workflows/ 2>/dev/null || true
+  cp "$REPO_ROOT/workflows/testing.md" ./workflows/ 2>/dev/null || true
+  cp "$REPO_ROOT/workflows/daily-tasks.md" ./workflows/ 2>/dev/null || true
+  
+  # Remove automation/sync files that shouldn't be in client repos
+  rm -rf monitoring/ 2>/dev/null || true
+  rm -rf scripts/ 2>/dev/null || true
+  rm -f clients.json 2>/dev/null || true
+  rm -f clients-to-add.json 2>/dev/null || true
+  rm -f .latest_changes.txt 2>/dev/null || true
+  
+  # Write client-specific README
+  if [ -f "$README_TEMPLATE" ]; then
+    sed "s/{{CLIENT_NAME}}/$name/g" "$README_TEMPLATE" > README.md
   fi
   
-  # Update .gitignore if needed
+  # Ensure .gitignore has .env
   if [ ! -f .gitignore ]; then
     cat > .gitignore << 'EOF'
 .env
@@ -81,9 +86,10 @@ node_modules/
 EOF
   fi
   
-  # Update .env.example
+  # Ensure .env.example exists
   if [ ! -f .env.example ]; then
     cat > .env.example << 'EOF'
+# Bland AI Credentials
 BLAND_API_KEY=your_api_key_here
 BLAND_ORG_ID=your_org_id_here
 PLANHAT_ID=your_planhat_id_here
@@ -92,16 +98,14 @@ CLIENT_NAME="Client Name"
 EOF
   fi
   
-  # Git operations
   git add -A 2>/dev/null || true
   
   if git diff --cached --quiet 2>/dev/null; then
     log_warn "No changes for $repo"
   else
-    git commit -m "docs: sync from bland-docs
+    git commit -m "docs: sync operational docs
 
-Updated: $(date '+%Y-%m-%d %H:%M:%S')" 2>/dev/null
-    
+$(date '+%Y-%m-%d %H:%M:%S')" 2>/dev/null
     git push origin main 2>/dev/null || git push 2>/dev/null
     log_info "Pushed to $repo"
   fi
@@ -110,21 +114,15 @@ Updated: $(date '+%Y-%m-%d %H:%M:%S')" 2>/dev/null
   return 0
 }
 
-# Main
 main() {
-  log "Starting client sync..."
-  log "Clients file: $CLIENTS_FILE"
-  
+  log "Syncing operational docs to clients..."
   mkdir -p "$CLIENTS_DIR"
   
   local total=$(jq '.clients | length' "$CLIENTS_FILE")
-  log "Total clients: $total"
-  
   local i=0 success=0 failed=0
   
   while IFS= read -r client; do
     i=$((i + 1))
-    
     name=$(echo "$client" | jq -r '.name')
     repo=$(echo "$client" | jq -r '.repo')
     
@@ -137,7 +135,7 @@ main() {
     fi
   done < <(jq -c '.clients[]' "$CLIENTS_FILE")
   
-  log "Sync complete! ✓ $success  ✗ $failed"
+  log "Done! ✓ $success  ✗ $failed"
 }
 
 main "$@"
