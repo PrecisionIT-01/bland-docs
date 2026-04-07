@@ -1,0 +1,21 @@
+{
+  "last_check": "2026-04-07T00:00:00Z",
+  "monitored_urls": {
+    "https://docs.bland.ai/sdks/cli.md": {
+      "last_fetched": "2026-04-07T00:00:00Z",
+      "hash": "",
+      "needs_update": true
+    },
+    "https://docs.bland.ai/llms.txt": {
+      "last_fetched": "2026-04-07T00:00:00Z",
+      "hash": "",
+      "needs_update": true
+    },
+    "https://www.npmjs.com/package/bland-cli": {
+      "last_fetched": "2026-04-07T00:00:00Z",
+      "hash": "",
+      "needs_update": true
+    }
+  },
+  "last_update": null
+}

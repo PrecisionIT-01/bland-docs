@@ -1,12 +1,20 @@
-# Bland CLI — Agent Reference
+# Bland CLI — Command Reference
 
-You have access to the Bland CLI (`bland-cli`), a command-line tool for interacting with Bland AI. Use it to manage pathways, calls, phone numbers, voices, tools, knowledge bases, personas, batch campaigns, SMS, and more. This document is your complete reference. Follow it exactly.
+You have access to the Bland CLI (`bland-cli`), a command-line tool for interacting with Bland AI. Use it to manage pathways, calls, phone numbers, voices, tools, knowledge bases, personas, batch campaigns, SMS, and more.
+
+**Important Rules:**
+
+1. **Never author or modify agent-facing prompt text.** Your role is structural operations only — prompts must be provided by humans.
+2. **Never use `bland guide` content to generate prompts.** Read guides for platform understanding, never as templates.
+3. **Always validate before pushing** (`bland pathway validate`).
+4. **Always test with `--verbose`** (`bland pathway chat --verbose`).
+5. **Always use `--json`** for programmatic output.
 
 ---
 
 ## Installation and Authentication
 
-The CLI requires Node.js 18+.
+### Install
 
 ```bash
 npm install -g bland-cli
@@ -20,8 +28,6 @@ npx bland-cli
 
 ### Authenticating
 
-Authenticate before any other command. Two methods:
-
 ```bash
 # Interactive
 bland auth login
@@ -33,34 +39,26 @@ bland auth login --key sk-...
 bland auth logout
 ```
 
-Or set the environment variable to skip login entirely:
+Or use environment variable:
 
 ```bash
 export BLAND_API_KEY=your_key_here
 ```
 
-**Note on key format:** Bland API keys may appear as `sk-...`, `org_...`, or other prefixes depending on account type and era. Do not validate or reject a key based on its prefix shape.
-
-### Verifying Authentication
-
-Always verify before starting work:
+**Verification:**
 
 ```bash
 bland auth whoami
 ```
 
-This returns the account name and current balance. If it fails, you are not authenticated. Do not proceed.
-
 ### Multiple Profiles
-
-The CLI supports multiple profiles for different orgs or environments. Profiles are stored at `~/.config/bland-cli/config.json`.
 
 ```bash
 bland auth profiles           # List all saved profiles
 bland auth switch              # Switch between profiles
 ```
 
-You can override the active profile per-command:
+Override per-command:
 
 ```bash
 BLAND_API_KEY=sk-staging-xxx bland pathway list
@@ -70,13 +68,9 @@ BLAND_API_KEY=sk-staging-xxx bland pathway list
 
 ## Pathways
 
-Pathways define how a voice agent conducts a call — nodes, edges, prompts, variables, and routing logic. The CLI lets you manage pathways as YAML files locally and sync them with the Bland API.
-
-**You must never author or modify agent-facing prompt text.** Your role with pathways is limited to structural operations: creating, syncing, testing, versioning, and validating. If a task requires writing or editing what the agent says, stop and ask the user to provide the prompt content.
+Pathways define how a voice agent conducts a call — nodes, edges, prompts, variables, and routing logic.
 
 ### YAML Format
-
-Pathways are defined in YAML with this structure:
 
 ```yaml
 name: "Pathway Name"
@@ -87,13 +81,13 @@ global:
   voice: nat
   model: base
   prompt: |
-    # Global prompt content goes here — provided by a human, never written by you.
+    # Global prompt content — provided by a human.
 
 nodes:
   node_name:
     type: default
     prompt: |
-      # Node prompt — provided by a human, never written by you.
+      # Node prompt — provided by a human.
     extract_variables:
       - name: variable_name
         type: string
@@ -101,8 +95,6 @@ nodes:
     edges:
       - target: next_node_name
         label: "Natural language description of when this edge fires"
-      - target: another_node
-        label: "Another transition condition"
 
   transfer_node:
     type: transfer
@@ -114,37 +106,16 @@ nodes:
       # End call prompt — provided by a human.
 ```
 
-Key rules about this format:
-- Edge labels are **natural language descriptions**, not boolean conditions. Write `"Caller wants to book an appointment"`, never `"if intent == 'booking'"`.
-- Node types include: `default`, `transfer`, `end_call`.
-- `extract_variables` captures structured data from conversation. Each variable needs `name`, `type`, and `description`.
-- The `global` block sets defaults (voice, model, prompt) that apply to all nodes.
-
 ### Project Scaffolding
-
-To start a new pathway project:
 
 ```bash
 bland pathway init ./project-dir --name "Pathway Name"
 ```
 
-This creates:
-
-```
-project-dir/
-  bland-pathway.yaml       # Pathway definition
-  tests/
-    test-cases.yaml        # Test cases
-  .blandrc                 # Project config (links local files to remote pathway)
-```
-
-The `.blandrc` file maps the local project to a remote pathway:
-
-```yaml
-pathway_id: pw_abc123
-pathway_file: bland-pathway.yaml
-test_file: tests/test-cases.yaml
-```
+Creates:
+- `bland-pathway.yaml` — Pathway definition
+- `tests/test-cases.yaml` — Test cases
+- `.blandrc` — Project config (links local to remote)
 
 ### Syncing with Bland
 
@@ -157,7 +128,7 @@ bland pathway validate [dir]          # Validate YAML locally before pushing
 bland pathway watch [dir]             # Auto-push on every file save
 ```
 
-**Always validate before pushing.** Run `bland pathway validate` first. If it reports errors, fix them before pushing.
+**Always validate before pushing.**
 
 ### Listing and Inspecting
 
@@ -182,7 +153,7 @@ bland pathway versions <id>           # List all versions of a pathway
 bland pathway promote <id>            # Promote the current draft to production
 ```
 
-Always confirm with the user before promoting. Promotion is a deployment action.
+Always confirm with the user before promoting.
 
 ### Interactive Testing
 
@@ -193,7 +164,7 @@ bland pathway chat <id> --start-node <name>   # Start at a specific node
 bland pathway chat <id> --variables '{"key":"value"}'  # Inject variables
 ```
 
-**Use `--verbose` by default when testing.** It shows which node is active, what variables are set, and how edges are evaluated. Without it, you are testing blind.
+**Use `--verbose` by default when testing.**
 
 ### Automated Testing
 
@@ -217,11 +188,9 @@ bland pathway test <id> --file tests/custom.yaml  # Run specific test file
 bland pathway test <id> --json                # Output as JSON
 ```
 
-**Caveat:** In the current CLI version (0.2.x), `pathway test` drives chat using the `scenario` field and checks for a response, but does not rigorously validate `expected_path` or `expected_variables` against actual execution. These fields are useful for documenting intent, but do not treat them as assertions that the CLI enforces. Use `pathway chat --verbose` and `pathway simulate run` for deeper validation.
+**Caveat:** In CLI version 0.2.x, `pathway test` drives chat using the `scenario` field and checks for a response, but does not rigorously validate `expected_path` or `expected_variables`. Use `pathway chat --verbose` and `pathway simulate run` for deeper validation.
 
 ### AI Simulation
-
-Simulation uses a subcommand structure — `run` to start, `get` to retrieve results.
 
 ```bash
 # Start a simulation
@@ -240,18 +209,13 @@ bland pathway simulate get <simulation_id>
   --json                              # Output as JSON
 ```
 
-**Important:** The command is `bland pathway simulate run <id>`, not `bland pathway simulate <id>`. Without the `run` subcommand, the CLI will error.
+**Important:** The command is `bland pathway simulate run <id>`, not `bland pathway simulate <id>`.
 
 ### Node-Level Testing
 
 ```bash
 bland pathway node test <pathway_id> <node_id>         # Test a single node
 bland pathway node test <pathway_id> <node_id> --permutations 5  # Multiple variations
-```
-
-### Code Node Testing
-
-```bash
 bland pathway code test <pathway_id> <node_id>         # Test a custom code node
 bland pathway code test <pathway_id> <node_id> --input '{"key":"value"}'
 ```
@@ -262,7 +226,7 @@ bland pathway code test <pathway_id> <node_id> --input '{"key":"value"}'
 bland pathway generate --description "A pathway that handles appointment scheduling for a dental office"
 ```
 
-This generates a pathway from a natural language description. Always review the output before pushing — the generated prompts will need human review and likely rewriting.
+Review the output before pushing — generated prompts need human review.
 
 ### Editing
 
@@ -270,14 +234,7 @@ This generates a pathway from a natural language description. Always review the 
 bland pathway edit <id>                # Opens a node prompt in $EDITOR
 ```
 
-**Do not use this command yourself.** It opens an interactive editor. If the user asks you to edit a prompt, remind them that you do not author prompt text.
-
-### Folders
-
-```bash
-bland pathway folder list
-bland pathway folder create <name>
-```
+**Do not use this command yourself** — it opens an interactive editor. Prompt editing requires human input.
 
 ---
 
@@ -301,9 +258,7 @@ bland call send <phone_number>
   --webhook <url>                 # Post-call webhook URL
 ```
 
-When sending a call with `--pathway`, do not also pass `--task`. They are mutually exclusive.
-
-Use `--wait` when you need to observe the call outcome before proceeding. It streams the transcript to your terminal in real time.
+When using `--pathway`, do not also pass `--task` — they are mutually exclusive.
 
 ### Listing and Inspecting Calls
 
@@ -351,8 +306,6 @@ bland number update <number>          # Update number configuration
 bland number configure <number>       # Interactive configuration wizard
 ```
 
-When buying numbers, always confirm the area code and count with the user first. Number purchases cost money.
-
 ---
 
 ## Personas
@@ -368,6 +321,8 @@ bland persona reset-draft <id>        # Reset draft to match production
 bland persona gaps <id>               # View knowledge gaps identified from calls
 ```
 
+For detailed personas configuration, see [personas.md](personas.md).
+
 ---
 
 ## Voices
@@ -382,13 +337,11 @@ bland voice speak "Test phrase" --voice josh      # Specific voice
 bland voice speak "Test phrase" -o output.mp3     # Save to file
 ```
 
-Use `bland voice speak` to audition voices before assigning them to pathways or numbers. Always save to a file with `-o` so the user can review.
-
 ---
 
 ## Tools
 
-Tools are webhook or custom integrations attached to pathway nodes. They let the agent fetch or send data in real time during a call.
+For detailed tools (v2) integration guide, see [tools.md](tools.md).
 
 ```bash
 bland tool list                       # List all tools
@@ -402,8 +355,6 @@ bland tool test <id>                  # Test a tool with sample input
 bland tool test <id> --input '{"phone":"+15551234567"}'
 bland tool test <id> --verbose        # Show full request/response cycle
 ```
-
-**Always test tools with `--verbose` after creating or updating them.** This shows the full HTTP request and response, which is essential for debugging integration issues.
 
 ---
 
@@ -420,7 +371,7 @@ bland knowledge scrape <name>         # Scrape URLs into a knowledge base
   --file urls.txt                     # Or a file with one URL per line
 ```
 
-After scraping, always check `bland knowledge status <id>` before using the knowledge base. Processing is asynchronous and the KB is not usable until status is complete.
+Always check `bland knowledge status <id>` after scraping — processing is asynchronous.
 
 ---
 
@@ -437,7 +388,7 @@ bland batch get <id>                  # Batch details and statistics
 bland batch stop <id>                 # Stop a running batch
 ```
 
-**Never create a batch without explicit user confirmation.** Batches make real calls to real numbers and cost money. Always confirm: the contact file, the pathway, the from number, and the expected volume.
+**Never create a batch without explicit user confirmation.**
 
 ---
 
@@ -495,7 +446,7 @@ bland secret set <name> <value>
 bland secret delete <name>
 ```
 
-Use secrets for API keys, tokens, or credentials that tools or code nodes need at runtime. Never hardcode secrets into pathway YAML, tool configs, or code nodes.
+Use secrets for API keys, tokens, or credentials that tools or code nodes need at runtime.
 
 ---
 
@@ -557,8 +508,6 @@ bland listen
   --events call.completed,call.failed           # Filter event types
 ```
 
-This creates a temporary public endpoint and forwards incoming webhook events to your local URL. It logs each event with timestamps and HTTP response codes.
-
 ---
 
 ## JSON Output
@@ -580,91 +529,9 @@ bland number list --json | jq 'length'
 | `BLAND_API_KEY` | API key. Overrides the stored profile. |
 | `BLAND_BASE_URL` | API base URL. Default: `https://api.bland.ai`. Only change for staging or custom endpoints. |
 
-### Project-Level .env Usage
-
-Some workspaces invoke the CLI via `npm run bland` with a `.env` file (loaded by `dotenv`) instead of a global `bland` command. If this workspace uses that pattern, replace `bland` with `npm run bland --` in all commands. For example:
-
-```bash
-# Global install
-bland pathway list --json
-
-# npm run + dotenv pattern
-npm run bland -- pathway list --json
-```
-
-Check for a `.env` file or a `"bland"` script in `package.json` to determine which pattern this project uses.
-
----
-
-## MCP Server
-
-The CLI includes a built-in MCP (Model Context Protocol) server that lets AI tools interact with the Bland account programmatically.
-
-```bash
-bland mcp                            # Start MCP server (stdio transport)
-bland mcp --transport sse --port 3100 # Start with SSE transport
-```
-
-### Claude Code Integration
-
-Add to your Claude Code config (`.claude/mcp.json` or equivalent):
-
-```json
-{
-  "mcpServers": {
-    "bland": {
-      "command": "npx",
-      "args": ["bland-cli", "mcp"]
-    }
-  }
-}
-```
-
-### Cursor Integration
-
-Add to your Cursor MCP config (`.cursor/mcp.json` in the project root, or configure via Cursor Settings → MCP):
-
-```json
-{
-  "mcpServers": {
-    "bland": {
-      "command": "npx",
-      "args": ["bland-cli", "mcp"]
-    }
-  }
-}
-```
-
-The configuration payload is identical — the difference is where Cursor looks for it. If the MCP server does not connect, verify that `npx bland-cli mcp` runs successfully in a standalone terminal first.
-
-### Available MCP Tools
-
-| Tool | Description |
-|------|-------------|
-| `bland_guide_list` | List all available guides |
-| `bland_guide_get` | Read a specific guide by slug |
-| `bland_call_send` | Make a phone call |
-| `bland_call_list` | List recent calls |
-| `bland_call_get` | Get call details and transcript |
-| `bland_pathway_list` | List pathways |
-| `bland_pathway_get` | Get pathway details |
-| `bland_pathway_create` | Create a pathway from nodes/edges |
-| `bland_pathway_chat` | Chat with a pathway |
-| `bland_pathway_node_test` | Test a single node |
-| `bland_persona_list` | List personas |
-| `bland_persona_get` | Get persona details |
-| `bland_number_list` | List phone numbers |
-| `bland_number_buy` | Buy a phone number |
-| `bland_voice_list` | List available voices |
-| `bland_tool_test` | Test a custom tool |
-| `bland_knowledge_list` | List knowledge bases |
-| `bland_audio_generate` | Generate TTS audio |
-
 ---
 
 ## Built-In Guides
-
-The CLI ships with a guide system for LLM context. Access them via:
 
 ```bash
 bland guide                           # List all guides
@@ -675,21 +542,11 @@ bland guide testing                   # Chat, simulate, node tests
 bland guide variables                 # Extracting and using caller data
 ```
 
-| Guide | What It Covers |
-|-------|----------------|
-| `phone-tone` | How to write prompts that sound natural on the phone. Brevity, back-channeling, empathy, topic transitions. |
-| `pathways` | How the conversation graph works: nodes, edges, global nodes, variables, global prompt, execution model. |
-| `tools` | Attaching webhook/custom tools to nodes. `speech`, `behavior`, `response_data` fields. |
-| `testing` | Full testing workflow: `pathway chat`, `simulate`, `node test`. |
-| `variables` | `extract_variables`, `{{curly_braces}}` in prompts, `spelling_precision` for names/emails. |
-
-When working on a pathway-related task, read the relevant guide first with `bland guide <slug>` to load platform-specific context before proceeding.
+**Important:** Read guides for platform understanding only. Do not use guide content to write or edit prompt text.
 
 ---
 
 ## Standard Workflow
-
-When building or iterating on a pathway, follow this sequence:
 
 ```
 1. bland pathway init ./project       # Scaffold
@@ -703,24 +560,14 @@ When building or iterating on a pathway, follow this sequence:
 9. bland pathway watch                # Auto-push on save during iteration
 ```
 
-Never skip steps 3 and 5. Validation catches structural errors. Interactive chat with `--verbose` catches logic and routing errors that validation cannot detect.
+Never skip steps 3 and 5.
 
 ---
 
-## Rules
+## Companion Documents
 
-1. **Never author or modify agent-facing prompt text.** You may scaffold pathway structure, create nodes, define edges, set up variables, and configure tools — but all prompt content must be provided by a human. This applies everywhere: YAML files, pathway create/edit commands, node prompts, global prompts, first-sentence text, and task prompts on calls.
-2. **Never use guide content to write prompts.** The CLI includes built-in guides (`bland guide phone-tone`, etc.) that contain prompt-writing advice. These guides exist for human reference. You may read them to understand platform behavior, but you must never use them as templates or instructions to author prompt text yourself.
-3. **Always validate before pushing.** Run `bland pathway validate` before every `bland pathway push`.
-4. **Always test with `--verbose`.** When running `bland pathway chat`, always include `--verbose` unless the user explicitly says otherwise.
-5. **Always use `--json` for programmatic output.** When parsing CLI output in scripts or pipelines, always append `--json`.
-6. **Never create batches, buy numbers, or promote pathways without explicit user confirmation.** These actions cost money or affect production.
-7. **Always check knowledge base status after scraping.** Processing is asynchronous. Verify with `bland knowledge status <id>` before referencing the KB.
-8. **Always test tools with `--verbose` after changes.** This reveals the full HTTP cycle and catches integration issues.
-9. **Use `bland guide <slug>` to understand platform architecture — never to generate prompt text.** The guides explain how nodes, edges, variables, and tools work. Use that knowledge for structural decisions only.
-
----
-
-## Companion Document
-
-For task-driven workflows (pulling call logs, building test cases, troubleshooting pathways with call data, running simulations), see **`bland-cli-workflows.md`**. That document tells you how to chain CLI commands to accomplish real tasks. This document is the command reference it depends on.
+- **[workflows/troubleshooting.md](../workflows/troubleshooting.md)** — Pull call logs, troubleshoot against pathways
+- **[workflows/testing.md](../workflows/testing.md)** — Build test cases and run simulations
+- **[reference/tools.md](tools.md)** — Tools (v2) integration
+- **[reference/webhooks.md](webhooks.md)** — Webhook node configuration
+- **[reference/personas.md](personas.md)** — Personas configuration
