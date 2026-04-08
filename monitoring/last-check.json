@@ -1,1 +1,11 @@
-{"last_check": "2026-04-07T19:31:52Z", "last_update": "2026-04-07T19:31:52Z"}
+{
+  "last_check": "2026-04-08T08:00:04Z",
+  "hashes": {
+    "https://docs.bland.ai/sdks/cli.md": "51e91577fda48ca6cb0ee6b900d9f5acbf44f998f3d067f121efdf1c21e1afd1"
+,
+    "https://docs.bland.ai/llms.txt": "7fa796f3f95b77c39492ec10c9fcc554981c478a1e3172aa3d1252a20a1488dd"
+,
+    "https://www.npmjs.com/package/bland-cli": ""
+
+  }
+}
