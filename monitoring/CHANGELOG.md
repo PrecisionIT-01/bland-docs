@@ -4,6 +4,16 @@ Track of local updates made to this documentation repository based on changes de
 
 ---
 
+## 2026-04-10
+
+Changes detected:
+
+- https://docs.bland.ai/sdks/cli.md (hash: null... → 2884a6647807e343...)
+- https://docs.bland.ai/llms.txt (hash: null... → a1e88a997cbc4f3b...)
+
+
+---
+
 ## 2026-04-08
 
 Changes detected:
