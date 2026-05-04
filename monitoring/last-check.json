@@ -1,9 +1,9 @@
 {
-  "last_check": "2026-05-03T08:00:02Z",
+  "last_check": "2026-05-04T08:00:03Z",
   "hashes": {
     "https://docs.bland.ai/sdks/cli.md": "55d34e55a2db0f7aed7f16d5dfe08eed30dba1a8d642243cf10c1f01f60ac5d5"
 ,
-    "https://docs.bland.ai/llms.txt": "754e3b50b394622a87a1ee70a100f4d6ed9ee72a55953fe97e875c80c146f10d"
+    "https://docs.bland.ai/llms.txt": "c62bebc85ed37329b62a64131d3125120803fe6f5df365199e469a7b7f82c5df"
 ,
     "https://www.npmjs.com/package/bland-cli": ""
 
